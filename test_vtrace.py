@@ -1,8 +1,10 @@
 """V-trace 테스트 모듈."""
 
 import numpy as np
+import torch
 
 import vtrace
+from learner import calc_loss
 
 
 def _shaped_arange(*shape):
@@ -27,7 +29,7 @@ def _ground_truth_calculation(discounts, log_rhos, rewards, values,
 
     Args:
         discounts: 감쇄율. [T, B] 형태
-        log_rhos: 로그 IS 가중치. [T, B, NUM_ACTIONS] 형태. (실재로는 선형?)
+        log_rhos: 로그 IS 가중치. [T, B] 형태.
         rewards: 행위 정책에 따라 생성된 리워드. [T, B] 형태
         values: 대상 정책에 대한 가치 함수 추정. [T, B] 형태
         bootstrap_value, 시간 T에서 가치 함수 추정. [B] 형태
@@ -56,11 +58,13 @@ def _ground_truth_calculation(discounts, log_rhos, rewards, values,
     # t + 1의 value
     values_t_plus_1 = np.concatenate([values, bootstrap_value[None, :]],
                                      axis=0)
+    # 전개(unroll) 횟수 만큼
     for s in range(seq_len):
-        v_s = np.copy(values[s])  # Very important copy.
+        v_s = np.copy(values[s])  # 중요한 복사
         for t in range(s, seq_len):  # s + n - 1
             delta = clipped_rhos[t] * (rewards[t] + discounts[t] *
                                        values_t_plus_1[t + 1] - values[t])
+            # 식에서 감쇄는 power로 되어 있으나 결국 같음.
             v_s += (np.prod(discounts[s:t], axis=0) *
                     np.prod(cs[s:t], axis=0) * delta)
         vs.append(v_s)
@@ -75,7 +79,7 @@ def _ground_truth_calculation(discounts, log_rhos, rewards, values,
 def test_vtrace_from_iw():
     """V-trace 중요도 가중치 테스트."""
     batch_size = 1  # 2
-    seq_len = 2  # 5
+    seq_len = 5
     log_rhos = _shaped_arange(seq_len, batch_size) / (batch_size * seq_len)
     log_rhos = 5 * (log_rhos - 0.5)  # [0.0, 1.0) -> [-2.5, 2.5).
     values = {
@@ -109,6 +113,8 @@ def test_log_probs_from_logits_and_actions():
     num_actions = 3
     batch_size = 2
     policy_logits = _shaped_arange(seq_len, batch_size, num_actions) + 10
+    np.random.seed(0)
+
     actions = np.random.randint(
         0, num_actions, size=(seq_len, batch_size), dtype=np.int32)
     action_log_probs = vtrace.log_probs_from_logits_and_actions(
@@ -132,19 +138,20 @@ def test_log_probs_from_logits_and_actions():
 
 def test_vtrace_from_logit():
     """V-trace를 로짓에서 계산 테스트."""
-    seq_len = 5
+    seq_len = 5  # n-step
     num_actions = 3
     batch_size = 2
     clip_rho_threshold = None  # No clipping.
     clip_pg_rho_threshold = None  # No clipping.
 
+    np.random.seed(0)
     values = {
         'behavior_policy_logits':
             _shaped_arange(seq_len, batch_size, num_actions),
         'target_policy_logits':
             _shaped_arange(seq_len, batch_size, num_actions),
         'actions':
-            np.random.randint(0, num_actions, size=(seq_len, batch_size)),
+            np.random.randint(0, num_actions - 1, size=(seq_len, batch_size)),
         'discounts':
             np.array(  # T, B where B_i: [0.9 / (i+1)] * T
                 [[0.9 / (b + 1)
@@ -193,3 +200,10 @@ def test_vtrace_from_logit():
         assert np.allclose(g, o.data.tolist())
     for g, o in zip(ground_truth_log_rhos, from_logit_output.log_rhos):
         assert np.allclose(g, o.data.tolist())
+
+    logits = torch.Tensor(values['behavior_policy_logits'])
+    actions = torch.LongTensor(values['actions'])
+    advantages = from_iw.pg_advantages
+    import pdb; pdb.set_trace()  # breakpoint fd504776 //
+    loss = calc_loss(logits, actions, advantages)
+    pass

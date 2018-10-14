@@ -194,30 +194,30 @@ def get_logger():
     return logger.info
 
 
-def calc_loss(batch, net, tgt_net, device='cpu'):
-    """손실 계산."""
-    states, actions, rewards, dones, next_states = batch
-    states = byte2float(states)
-    next_states = byte2float(next_states)
+# def calc_loss(batch, net, tgt_net, device='cpu'):
+#     """손실 계산."""
+#     states, actions, rewards, dones, next_states = batch
+#     states = byte2float(states)
+#     next_states = byte2float(next_states)
 
-    states_v = torch.tensor(states).to(device)
-    next_states_v = torch.tensor(next_states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    done_mask = torch.ByteTensor(dones).to(device)
+#     states_v = torch.tensor(states).to(device)
+#     next_states_v = torch.tensor(next_states).to(device)
+#     actions_v = torch.tensor(actions).to(device)
+#     rewards_v = torch.tensor(rewards).to(device)
+#     done_mask = torch.ByteTensor(dones).to(device)
 
-    qs = net(states_v)
-    q_maxs = qs.data.cpu().numpy().max(axis=1)
-    state_action_values = qs.gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
-    next_state_values = tgt_net(next_states_v).max(1)[0]
-    next_state_values[done_mask] = 0.0
-    next_state_values = next_state_values.detach()
+#     qs = net(states_v)
+#     q_maxs = qs.data.cpu().numpy().max(axis=1)
+#     state_action_values = qs.gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+#     next_state_values = tgt_net(next_states_v).max(1)[0]
+#     next_state_values[done_mask] = 0.0
+#     next_state_values = next_state_values.detach()
 
-    expected_state_action_values = next_state_values * GAMMA + rewards_v
-    errors = torch.abs(state_action_values - expected_state_action_values)\
-        .data.cpu().numpy()
-    losses = nn.MSELoss()(state_action_values, expected_state_action_values)
-    return losses, errors, q_maxs
+#     expected_state_action_values = next_state_values * GAMMA + rewards_v
+#     errors = torch.abs(state_action_values - expected_state_action_values)\
+#         .data.cpu().numpy()
+#     losses = nn.MSELoss()(state_action_values, expected_state_action_values)
+#     return losses, errors, q_maxs
 
 
 def weights_init(m):

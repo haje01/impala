@@ -7,13 +7,14 @@ from io import BytesIO
 import zmq
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import functional as F  # NOQA
 from torch import optim
 # from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tensorboardX import SummaryWriter
 
-from common import DQN, ENV_NAME, get_device, get_logger, calc_loss,\
-    weights_init, Experience, PRIORITIZED
+from common import DQN, ENV_NAME, get_device, get_logger, weights_init,\
+    Experience, PRIORITIZED
 from wrappers import make_env
 
 STOP_REWARD = 500
@@ -23,6 +24,9 @@ SHOW_FREQ = 10
 PUBLISH_FREQ = 40  # Batch 크기에 맞게 (10초 정도)
 SAVE_FREQ = 30
 GRADIENT_CLIP = 40
+
+ENTROPY_COST = 0.00025
+BASELINE_COST = 0.5
 
 log = get_logger()
 
@@ -39,6 +43,26 @@ def init_zmq():
     buf_sock = context.socket(zmq.REQ)
     buf_sock.connect("tcp://localhost:5555")
     return context, act_sock, buf_sock
+
+
+def calc_loss(logits, actions, advantages):
+    """손실 계산."""
+    advantages = advantages.detach()
+    # policy grandient loss
+    ce_loss = nn.CrossEntropyLoss(reduce=False)
+    pg_losses = ce_loss(logits.permute(0, 2, 1), actions) * advantages
+    pg_loss = pg_losses.sum()
+
+    # entropy loss
+    policy = nn.Softmax(2)(logits)
+    log_policy = nn.LogSoftmax(2)(logits)
+    entropy_loss = -(-policy * log_policy).sum()
+
+    # baseline loss
+    baseline_loss = .5 * (advantages ** 2).sum()
+
+    return pg_loss + ENTROPY_COST * entropy_loss +\
+        BASELINE_COST * baseline_loss
 
 
 def publish_model(net, tgt_net, act_sock):

@@ -21,19 +21,19 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
 
     T: 시간 차원 [0, T-1]
     B: 배치 크기
-    NUM_ACTIONS: 동작의
+    NUM_ACTIONS: 동작의 수
 
     Args:
-        log_rhos: 로그 중요도 샘플 가중치. [T, B, NUM_ACTIONS] 형태.
-        discounts: 행위 정책을 따를 때 조우한 감쇄율. [T, B] 형태
-        rewards: 행위 정책을 따를 때 생성된 리워드. [T, B] 형태
-        values: 타겟 정책에 대한 가치 함수 추정. [T, B] 형태
+        log_rhos: 로그 중요도 샘플 가중치. [T, B] 형태.
+        discounts: 감쇄율. 에피소드 끝에서 0. [T, B] 형태
+        rewards: 행위 정책에서 생성된 리워드. [T, B] 형태
+        values: 타겟 정책에서 가치 함수 추정. [T, B] 형태
         bootstrap_value, 시간 T에서 가치 함수 추정. [B] 형태
         clip_rho_threshold: 중요도 가중치를 위한 클리핑 임계치(rho). 논문에서 rho bar
         clip_pg_rho_threshold: V-trace 액터-크리틱 식에서 rhos s에 대한 클리핑 임계치.
 
     Returns:
-        VTraceFromLogits
+        VTraceReturns
     """
     log_rhos = torch.Tensor(log_rhos)
     discounts = torch.Tensor(discounts)
@@ -41,28 +41,30 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
     values = torch.Tensor(values)
     time_steps = discounts.size(0)
     batch_size = discounts.size(1)
-
     bootstrap_value = torch.Tensor(bootstrap_value)
     rhos = torch.exp(log_rhos)
+
+    # IS 절단
     if clip_rho_threshold is not None:
         clipped_rhos = torch.clamp(rhos, None, clip_rho_threshold)
     else:
         clipped_rhos = rhos
-
     cs = torch.clamp(rhos, None, 1.0)
-    # [v1, ..., v_t+1]을 얻기 위해 부트스트랩 가치 추가
+
+    # [v1, ..., v_t+1]을 얻기 위해(for n-step) 부트스트랩 가치 추가
     values_t_plus_1 = torch.cat([values[1:], bootstrap_value.view(1, -1)])
+    # 모든 T만큼 한 번에 계산
     deltas = clipped_rhos * (rewards + discounts * values_t_plus_1 - values)
 
     acc = 0
     vals = []
-    # 모든 시퀀스가 역전되었기에, 계산은 뒤에서 부터 시작
+    # 모든 t에 대해 계산. 시퀀스가 역전되었기에, 계산은 뒤에서 부터 시작
     for t in range(time_steps - 1, -1, -1):
         val = deltas[t] + discounts[t] * cs[t] * acc
         vals.append(val)
-        acc += val
+        acc = val
 
-    # 결과를 거꾸로해 원 순서로 복귀
+    # 결과를 거꾸로해 원래 순서로 복귀
     vs_minus_v_xs = torch.cat(vals[::-1]).view(-1, batch_size)
     # V(x_s)를 더해 v_s를 얻음
     vs = torch.add(vs_minus_v_xs, values)
