@@ -6,12 +6,11 @@ from collections import defaultdict, deque
 import zmq
 import numpy as np
 
-from common import ReplayBuffer, PrioReplayBuffer, async_recv, ActorInfo,\
-    BufferInfo, get_logger, PRIORITIZED
+from common import ReplayBuffer, async_recv, ActorInfo, BufferInfo,\
+    get_logger, NUM_BATCH
 
-BUFFER_SIZE = 1000000  # 원래는 2,000,000
-START_SIZE = 50000    # 원래는 50,000
-BATCH_SIZE = 256      # 원래는 512
+BUFFER_SIZE = 10000
+START_SIZE = 500
 
 
 def average_actor_info(ainfos):
@@ -26,10 +25,7 @@ def average_actor_info(ainfos):
 
 log = get_logger()
 
-if PRIORITIZED:
-    memory = PrioReplayBuffer(BUFFER_SIZE)
-else:
-    memory = ReplayBuffer(BUFFER_SIZE)
+memory = ReplayBuffer(BUFFER_SIZE)
 
 context = zmq.Context()
 
@@ -49,12 +45,8 @@ while True:
     payload = async_recv(recv)
     if payload is not None:
         st = time.time()
-        if PRIORITIZED:
-            actor_id, batch, prios, ainfo = pickle.loads(payload)
-            memory.populate(batch, prios)
-        else:
-            actor_id, batch, ainfo = pickle.loads(payload)
-            memory.merge(batch)
+        actor_id, batch, ainfo = pickle.loads(payload)
+        memory.merge(batch)
         actor_infos[actor_id].append(ainfo)
 
         log("receive replay - memory size {} elapse {:.2f}".
@@ -64,13 +56,6 @@ while True:
     payload = async_recv(learner)
     if payload is not None:
         st = time.time()
-        if PRIORITIZED:
-            # 러너 학습 에러 버퍼에 반영
-            idxs, errors = pickle.loads(payload)
-            if idxs is not None:
-                # print("update by learner")
-                # print("  idx_err: {}".format(dict(zip(idxs, errors))))
-                memory.update(idxs, errors)
 
         # 러너가 보낸 베치와 에러
         if len(actor_infos) > 0:
@@ -84,14 +69,8 @@ while True:
         else:
             # 충분하면 샘플링 후 보냄
             binfo = BufferInfo(len(memory))
-            if PRIORITIZED:
-                batch, idxs, prios = memory.sample(BATCH_SIZE)
-                payload = pickle.dumps((batch, idxs, ainfos, binfo))
-                # print("send to learner")
-                # print("  idx_prio: {}".format(dict(zip(idxs, prios))))
-            else:
-                batch = memory.sample(BATCH_SIZE)
-                payload = pickle.dumps((batch, ainfos, binfo))
+            batch = memory.sample(NUM_BATCH)
+            payload = pickle.dumps((batch, ainfos, binfo))
 
         # 전송
         learner.send(payload)

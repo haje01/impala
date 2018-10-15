@@ -11,14 +11,14 @@ from torch import nn
 from torch.nn.init import xavier_uniform_
 
 GAMMA = 0.99
-ENV_NAME = "BreakoutNoFrameskip-v4"
+NUM_UNROLL = 10
+NUM_BATCH = 32
 
-PRIORITIZED = True
-PRIO_ALPHA = 0.6
+ENV_NAME = "PongNoFrameskip-v4"
 
-Experience = namedtuple('Experience', field_names=['state', 'action', 'reward',
-                        'done', 'new_state'])
 
+Experience = namedtuple('Experience', field_names=['state', 'logits', 'action',
+                        'reward'])
 
 ActorInfo = namedtuple('ActorInfo',
                        field_names=['episode', 'frame', 'reward', 'speed'])
@@ -42,30 +42,33 @@ def get_device():
     return device
 
 
-class DQN(nn.Module):
-    """Deep Q-Network."""
+class A2C(nn.Module):
+    """Advantage Actor-Critic."""
 
     def __init__(self, input_shape, n_actions):
         """초기화."""
-        super(DQN, self).__init__()
+        super(A2C, self).__init__()
 
         self.conv = nn.Sequential(
             nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
-            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.BatchNorm2d(64),
             nn.ReLU()
         )
 
         conv_out_size = self._get_conv_out(input_shape)
-        self.fc = nn.Sequential(
+        self.policy = nn.Sequential(
             nn.Linear(conv_out_size, 512),
             nn.ReLU(),
             nn.Linear(512, n_actions)
+        )
+
+        self.value = nn.Sequential(
+            nn.Linear(conv_out_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, 1)
         )
 
     def _get_conv_out(self, shape):
@@ -74,8 +77,9 @@ class DQN(nn.Module):
 
     def forward(self, x):
         """전방 연쇄."""
-        conv_out = self.conv(x).view(x.size()[0], -1)
-        return self.fc(conv_out)
+        fx = x.float() / 256
+        conv_out = self.conv(fx).view(fx.size()[0], -1)
+        return self.policy(conv_out), self.value(conv_out)
 
 
 class ReplayBuffer:
@@ -100,59 +104,15 @@ class ReplayBuffer:
     def sample(self, batch_size):
         """경험 샘플링."""
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        states, actions, rewards, dones, next_states =\
+        states, logits, actions, rewards =\
             zip(*[self.buffer[idx] for idx in indices])
-        return np.array(states), np.array(actions), \
-            np.array(rewards, dtype=np.float32), \
-            np.array(dones, dtype=np.uint8), np.array(next_states)
+
+        return np.array(states), np.array(logits), np.array(actions),\
+            np.array(rewards, dtype=np.float32)
 
     def clear(self):
         """버퍼 초기화."""
         self.buffer.clear()
-
-
-class PrioReplayBuffer:
-    """우선 순위 경험 버퍼."""
-
-    def __init__(self, buf_size, prob_alpha=PRIO_ALPHA):
-        """초기화."""
-        self.prob_alpha = prob_alpha
-        self.capacity = buf_size
-        self.pos = 0
-        self.buffer = []
-        self.priorities = np.zeros((buf_size, ), dtype=np.float32)
-
-    def __len__(self):
-        """길이 연산자."""
-        return len(self.buffer)
-
-    def populate(self, batch, prios):
-        """채우기."""
-        for sample, prio in zip(batch, prios):
-            if len(self.buffer) < self.capacity:
-                self.buffer.append(sample)
-            else:
-                self.buffer[self.pos] = sample
-            self.priorities[self.pos] = prio
-            self.pos = (self.pos + 1) % self.capacity
-
-    def sample(self, batch_size, beta=0.4):
-        """샘플링."""
-        if len(self.buffer) == self.capacity:
-            prios = self.priorities
-        else:
-            prios = self.priorities[:self.pos]
-        probs = prios ** self.prob_alpha
-
-        probs /= probs.sum()
-        indices = np.random.choice(len(self.buffer), batch_size, p=probs)
-        samples = [self.buffer[idx] for idx in indices]
-        return samples, indices, prios
-
-    def update(self, batch_indices, batch_priorities):
-        """우선도 갱신."""
-        for idx, prio in zip(batch_indices, batch_priorities):
-            self.priorities[idx] = prio
 
 
 def get_size(obj, seen=None):
@@ -226,12 +186,12 @@ def weights_init(m):
         xavier_uniform_(m.weight.data)
 
 
-def array_experience(state, action, reward, is_done, new_state):
-    """단일 경험을 array 형으로 만듦."""
-    return Experience(
-        np.array([state], dtype=np.uint8),
-        np.array([action]),
-        np.array([reward], dtype=np.float32),
-        np.array([is_done], dtype=np.uint8),
-        np.array([new_state], dtype=np.uint8)
-    )
+# def unpack_experience(state, action, reward, is_done, new_state):
+#     """단일 경험을 종류별 배열로 만듦."""
+#     return Experience(
+#         np.array([state], dtype=np.uint8),
+#         np.array([action]),
+#         np.array([reward], dtype=np.float32),
+#         np.array([is_done], dtype=np.uint8),
+#         np.array([new_state], dtype=np.uint8)
+#     )
