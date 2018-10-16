@@ -31,11 +31,11 @@ context = zmq.Context()
 
 # 액터/러너에게서 받을 소켓
 recv = context.socket(zmq.PULL)
-recv.bind("tcp://*:5558")
+recv.bind("tcp://*:6558")
 
 # 러너에게 보낼 소켓
 learner = context.socket(zmq.REP)
-learner.bind("tcp://*:5555")
+learner.bind("tcp://*:6555")
 
 actor_infos = defaultdict(lambda: deque(maxlen=300))  # 액터들이 보낸 정보
 

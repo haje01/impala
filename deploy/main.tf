@@ -38,14 +38,14 @@ resource "aws_default_subnet" "default" {
 }
 
 
-resource "aws_security_group" "distper" {
-    name = "distper-sg"
-    description = "Security group for DistPER."
+resource "aws_security_group" "impala" {
+    name = "impala-sg"
+    description = "Security group for IMPALA."
 
     # for learner & buffer
     ingress {
-        from_port = 5557
-        to_port = 5558
+        from_port = 6557
+        to_port = 6558
         protocol = "tcp"
         cidr_blocks = ["${aws_default_subnet.default.cidr_block}"]
     }
@@ -74,7 +74,7 @@ resource "aws_security_group" "distper" {
     }
 
     tags {
-        Name = "distper-sg"
+        Name = "impala-sg"
         Owner = "${var.proj_owner}"
     }
 }
@@ -85,7 +85,7 @@ resource "aws_instance" "master" {
     ami = "ami-b9e357d7"          # Deep Learning AMI (Ubuntu) Version 11.0
     instance_type = "p2.xlarge"   # GPU, 4 Cores, 61 GiB RAM
     key_name = "${var.aws_key_name}"
-    vpc_security_group_ids = ["${aws_security_group.distper.id}"]
+    vpc_security_group_ids = ["${aws_security_group.impala.id}"]
     subnet_id = "${aws_default_subnet.default.id}"
 
     provisioner "remote-exec" {
@@ -105,18 +105,18 @@ cd gym
 /home/ubuntu/anaconda3/envs/pytorch_p36/bin/pip install -e .
 /home/ubuntu/anaconda3/envs/pytorch_p36/bin/pip install gym[classic_control,atari]
 cd
-# git clone https://github.com/haje01/distper.git
-git clone -b breakout https://github.com/haje01/distper.git  # FIXME
-screen -S learner -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd distper; python learner.py nowait; exec bash"
-screen -S buffer -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd distper; python buffer.py; exec bash"
-screen -S board -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd distper; tensorboard --logdir=runs; exec bash"
+# git clone https://github.com/haje01/impala.git
+git clone -b breakout https://github.com/haje01/impala.git  # FIXME
+screen -S learner -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd impala; python learner.py nowait; exec bash"
+screen -S buffer -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd impala; python buffer.py; exec bash"
+screen -S board -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd impala; tensorboard --logdir=runs; exec bash"
 sleep 3
 EOF
         ]
     }
 
     tags {
-        Name = "distper-master"
+        Name = "impala-master"
         Owner = "${var.proj_owner}"
     }
 }
@@ -127,7 +127,7 @@ resource "aws_instance" "task" {
     ami = "ami-b9e357d7"          # Deep Learning AMI (Ubuntu) Version 11.0
     instance_type = "m5.xlarge"
     key_name = "${var.aws_key_name}"
-    vpc_security_group_ids = ["${aws_security_group.distper.id}"]
+    vpc_security_group_ids = ["${aws_security_group.impala.id}"]
     subnet_id = "${aws_default_subnet.default.id}"
     count = "${var.num_task_node}"
     depends_on = ["aws_instance.master"]
@@ -148,15 +148,15 @@ cd gym
 /home/ubuntu/anaconda3/envs/pytorch_p36/bin/pip install -e .
 /home/ubuntu/anaconda3/envs/pytorch_p36/bin/pip install gym[classic_control,atari]
 cd
-# git clone https://github.com/haje01/distper.git
-git clone -b breakout https://github.com/haje01/distper.git  # FIXME
+# git clone https://github.com/haje01/impala.git
+git clone -b breakout https://github.com/haje01/impala.git  # FIXME
 export MASTER_IP=${aws_instance.master.private_ip}
 export TNODE_ID=${count.index}
 export NUM_ACTOR=$((${var.num_task_node} * 4))
 idx=0
 while [ $idx -lt ${var.actor_per_node} ]
 do
-  screen -S "actor-$(($TNODE_ID*4+$idx))" -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd distper; ACTOR_ID=$(($TNODE_ID*4+$idx)) python actor.py; exec bash"
+  screen -S "actor-$(($TNODE_ID*4+$idx))" -dm bash -c "source anaconda3/bin/activate pytorch_p36; cd impala; ACTOR_ID=$(($TNODE_ID*4+$idx)) python actor.py; exec bash"
   idx=`expr $idx + 1`
 done
 sleep 3
@@ -165,7 +165,7 @@ EOF
     }
 
     tags {
-        Name = "distper-task"
+        Name = "impala-task"
         Owner = "${var.proj_owner}"
     }
 }

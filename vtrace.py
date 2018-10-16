@@ -15,7 +15,8 @@ VTraceReturns = collections.namedtuple('VTraceReturns', 'vs pg_advantages')
 
 
 def from_importance_weights(log_rhos, discounts, rewards, values,
-                            bootstrap_value, clip_rho_threshold=1.0,
+                            bootstrap_value, last_state_idx,
+                            clip_rho_threshold=1.0,
                             clip_pg_rho_threshold=1.0):
     """로그 중요도 가중치(IS)에서 V-trace를 계산.
 
@@ -28,7 +29,8 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
         discounts: 감쇄율. 에피소드 끝에서 0. [T, B] 형태
         rewards: 행위 정책에서 생성된 리워드. [T, B] 형태
         values: 타겟 정책에서 가치 함수 추정. [T, B] 형태
-        bootstrap_value, 시간 T에서 가치 함수 추정. [B] 형태
+        bootstrap_value: 시간 T에서 가치 함수 추정. [B] 형태
+        last_state_idx: 마지막 상태가 존재하는 인덱
         clip_rho_threshold: 중요도 가중치를 위한 클리핑 임계치(rho). 논문에서 rho bar
         clip_pg_rho_threshold: V-trace 액터-크리틱 식에서 rhos s에 대한 클리핑 임계치.
 
@@ -51,14 +53,19 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
         clipped_rhos = rhos
     cs = torch.clamp(rhos, None, 1.0)
 
+    lsi = last_state_idx
     # [v1, ..., v_t+1]을 얻기 위해(for n-step) 부트스트랩 가치 추가
-    values_t_plus_1 = torch.cat([values[1:], bootstrap_value.view(1, -1)])
-    # 모든 T만큼 한 번에 계산
-    deltas = clipped_rhos * (rewards + discounts * values_t_plus_1 - values)
+    values_t_plus_1 = \
+        torch.cat([values[1:, lsi], bootstrap_value.view(1, -1)])
+    # 모든 배치에 대해 TD 계산 (last_state가 있는 것만 예측 차이 반영)
+    deltas = rewards
+    if lsi:
+        deltas[:, lsi] += discounts[:, lsi] * values_t_plus_1 - values[:, lsi]
+    deltas *= clipped_rhos
 
     acc = 0
     vals = []
-    # 모든 t에 대해 계산. 시퀀스가 역전되었기에, 계산은 뒤에서 부터 시작
+    # 모든 T에 대해 계산. 시퀀스가 역전되었기에, 계산은 뒤에서 부터 시작
     for t in range(time_steps - 1, -1, -1):
         val = deltas[t] + discounts[t] * cs[t] * acc
         vals.append(val)
@@ -69,15 +76,18 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
     # V(x_s)를 더해 v_s를 얻음
     vs = torch.add(vs_minus_v_xs, values)
 
-    # 정책 경사를 위한 Advantage
-    vs_t_plus_1 = torch.cat([vs[1:], bootstrap_value.view(1, -1)])
+    # 정책 경사를 위한 Advantage 계산
+    vs_t_plus_1 = torch.cat([vs[1:, lsi], bootstrap_value.view(1, -1)])
     if clip_pg_rho_threshold is not None:
         clipped_pg_rhos = torch.clamp(rhos, None, clip_pg_rho_threshold)
     else:
         clipped_pg_rhos = rhos
 
-    pg_advantages = (clipped_pg_rhos *
-                     (rewards + discounts * vs_t_plus_1 - values))
+    pg_advantages = rewards
+    if lsi:
+        pg_advantages[:, lsi] += discounts[:, lsi] * vs_t_plus_1 - \
+            values[:, lsi]
+    pg_advantages *= clipped_pg_rhos
     return VTraceReturns(vs=vs.detach(), pg_advantages=pg_advantages.detach())
 
 

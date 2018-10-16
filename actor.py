@@ -19,8 +19,6 @@ SHOW_FREQ = 100       # 로그 출력 주기
 SEND_SIZE = 100       # 보낼 전이 수
 SEND_FREQ = 100       # 보낼 빈도
 MODEL_UPDATE_FREQ = 300    # 러너의 모델 가져올 주기
-EPS_BASE = 0.4   # eps 계산용
-EPS_ALPHA = 3    # eps 계산용
 
 actor_id = int(os.environ.get('ACTOR_ID', '-1'))    # 액터의 ID
 assert actor_id != -1
@@ -38,11 +36,11 @@ def init_zmq():
     lrn_sock = context.socket(zmq.SUB)
     lrn_sock.setsockopt_string(zmq.SUBSCRIBE, '')
     lrn_sock.setsockopt(zmq.CONFLATE, 1)
-    lrn_sock.connect("tcp://{}:5557".format(master_ip))
+    lrn_sock.connect("tcp://{}:6557".format(master_ip))
 
     # 버퍼로 보낼 소켓
     buf_sock = context.socket(zmq.PUSH)
-    buf_sock.connect("tcp://{}:5558".format(master_ip))
+    buf_sock.connect("tcp://{}:6558".format(master_ip))
     return context, lrn_sock, buf_sock
 
 
@@ -54,17 +52,17 @@ class Agent:
         self.env = env
         self.memory = memory
         self.unroll_cnt = unroll_cnt
-        self.reward_sum = 0
         self._reset()
 
     def _reset(self):
         """리셋 구현."""
         self.last_state = float2byte(self.env.reset())
         self.action_cnt = defaultdict(int)
-        self.states = [None] * self.unroll_cnt
-        self.logits = [None] * self.unroll_cnt
-        self.actions = [None] * self.unroll_cnt
-        self.rewards = [None] * self.unroll_cnt
+        self.states = [None] * (self.unroll_cnt + 1)
+        self.logits = [None] * (self.unroll_cnt + 1)
+        self.actions = [None] * (self.unroll_cnt + 1)
+        self.rewards = [None] * (self.unroll_cnt + 1)
+        self.tot_reward = 0.0
 
     def get_logit_and_action(self, net, state):
         """주어진 상태에서 동작을 선택."""
@@ -81,11 +79,11 @@ class Agent:
     def play_step(self, net, frame_idx):
         """진행."""
         state = self.last_state
-        tot_reward = 0.0
-        done_reward = None
+        last_state = done_reward = None
+        step_reward = 0.0
 
         # 언롤만큼 진행
-        for ti in range(self.unroll_cnt):
+        for ti in range(self.unroll_cnt + 1):
             self.states[ti] = state
             logit, action = self.get_logit_and_action(net, state)
             self.logits[ti] = logit
@@ -96,26 +94,33 @@ class Agent:
             if is_done:
                 break
 
-        # 역방향으로 감쇄 적용
-        for i in range(ti, -1, -1):
-            tot_reward *= GAMMA
-            tot_reward += self.rewards[i]
+        if is_done and ti < self.unroll_cnt:
+            self.rewards[ti] = reward
+        else:
+            last_state = self.states[-1]
+            self.rewards[ti] = None
 
-        states_na = np.array(self.states)
-        logits_na = np.array(self.logits)
-        actions_na = np.array(self.actions)
-        rewards_na = np.array(self.rewards)
-        exp = Experience(states_na, logits_na, actions_na, rewards_na)
+        # 역방향으로 감쇄 적용
+        for i in range(ti - 1, -1, -1):
+            if self.rewards[i] is not None:
+                step_reward *= GAMMA
+                step_reward += self.rewards[i]
+
+        states_np = np.array(self.states[:-1])
+        logits_np = np.array(self.logits[:-1])
+        actions_np = np.array(self.actions[:-1])
+        rewards_np = np.array(self.rewards[:-1])
+        exp = Experience(states_np, logits_np, actions_np, rewards_np,
+                         last_state)
         self.memory.append(exp)
         self.last_state = state
-        self.reward_sum += tot_reward
+        self.tot_reward += step_reward
 
         if frame_idx % SHOW_FREQ == 0:
             log("{}: buffer size {} ".format(frame_idx, len(self.memory)))
 
         if is_done:
-            self.reward_sum += tot_reward
-            done_reward = tot_reward
+            done_reward = self.tot_reward
             self._reset()
 
         return done_reward
@@ -139,78 +144,6 @@ class Agent:
         payload = pickle.dumps((actor_id, self.memory, info))
         self.memory.clear()
         buf_sock.send(payload)
-
-# class Agent:
-#     """에이전트."""
-
-#     def __init__(self, env, memory, epsilon):
-#         """초기화."""
-#         self.env = env
-#         self.memory = memory
-#         self.epsilon = epsilon
-#         self._reset()
-
-#     def _reset(self):
-#         """리셋 구현."""
-#         self.state = float2byte(self.env.reset())
-#         self.tot_reward = 0.0
-#         self.action_cnt = defaultdict(int)
-
-#     def show_action_rate(self):
-#         """동작별 선택 비율 표시."""
-#         meanings = self.env.unwrapped.get_action_meanings()
-#         total = float(sum(self.action_cnt.values()))
-#         if total == 0:
-#             return
-#         msg = "actions - "
-#         for i, m in enumerate(meanings):
-#             msg += "{}: {:.2f}, ".format(meanings[i],
-#                                          self.action_cnt[i] / total)
-#         log(msg)
-
-#     def play_step(self, net, frame_idx):
-#         """플레이 진행."""
-#         done_reward = None
-
-#         # 가치가 높은 동작.
-#         state = byte2float(self.state)
-#         state_a = np.array([state])
-#         state_v = torch.tensor(state_a)
-#         logits_v, value_v = net(states_v)
-#         log_prob_v = F.log_softmax(logits_v, dim=1)
-
-#         _, act_v = torch.max(q_vals_v, dim=1)
-#         action = int(act_v.item())
-#         self.action_cnt[action] += 1
-
-#         # 환경 진행
-#         new_state, reward, is_done, _ = self.env.step(action)
-#         new_state = float2byte(new_state)
-#         self.tot_reward += reward
-
-#         # 버퍼에 추가
-#         exp = Experience(self.state, action, reward, is_done, new_state)
-#         self.memory.append(exp)
-#         self.state = new_state
-
-#         if frame_idx % SHOW_FREQ == 0:
-#             log("{}: buffer size {} ".format(frame_idx, len(self.memory)))
-
-#         # 종료되었으면 리셋
-#         if is_done:
-#             done_reward = self.tot_reward
-#             self._reset()
-
-#         # 에피소드 리워드 반환
-#         return done_reward
-
-#     def send_replay(self, buf_sock, info):
-#         """우선 순위로 샘플링한 리프레이 데이터와 정보를 전송."""
-#         log("send replay - speed {} f/s".format(info.speed))
-#         # 아니면 다보냄
-#         payload = pickle.dumps((actor_id, self.memory, info))
-#         self.memory.clear()
-#         buf_sock.send(payload)
 
 
 def receive_model(lrn_sock, net, block):
@@ -259,12 +192,13 @@ def main():
         frame_idx += 1
 
         # 스텝 진행 (에피소드 종료면 reset까지)
-        reward = agent.play_step(net, frame_idx)
+        ep_reward = agent.play_step(net, frame_idx)
 
-        # 리워드가 있는 경우 (에피소드 종료)
-        if reward is not None:
+        # 에피소드 리워드가 있는 경우 (에피소드 종료)
+        if ep_reward is not None:
             episode += 1
-            p_reward = reward
+            p_reward = ep_reward
+            log("Episode finished! reward {}".format(ep_reward))
 
         # 보내기
         if frame_idx % SEND_FREQ == 0:

@@ -12,13 +12,13 @@ from torch.nn.init import xavier_uniform_
 
 GAMMA = 0.99
 NUM_UNROLL = 10
-NUM_BATCH = 32
+NUM_BATCH = 64
 
 ENV_NAME = "PongNoFrameskip-v4"
 
 
 Experience = namedtuple('Experience', field_names=['state', 'logits', 'action',
-                        'reward'])
+                        'reward', 'last_state'])
 
 ActorInfo = namedtuple('ActorInfo',
                        field_names=['episode', 'frame', 'reward', 'speed'])
@@ -104,11 +104,11 @@ class ReplayBuffer:
     def sample(self, batch_size):
         """경험 샘플링."""
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        states, logits, actions, rewards =\
+        states, logits, actions, rewards, last_state =\
             zip(*[self.buffer[idx] for idx in indices])
 
         return np.array(states), np.array(logits), np.array(actions),\
-            np.array(rewards, dtype=np.float32)
+            np.array(rewards, dtype=np.float32), np.array(last_state)
 
     def clear(self):
         """버퍼 초기화."""
