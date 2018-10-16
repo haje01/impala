@@ -110,7 +110,7 @@ def main():
     # 감쇄 상수
     discounts = np.array([pow(GAMMA, i) for i in range(NUM_UNROLL)])
     discounts = np.repeat(discounts, NUM_BATCH).reshape(NUM_UNROLL, NUM_BATCH)
-    discounts_v = torch.Tensor(discounts)
+    discounts_v = torch.Tensor(discounts).to(device)
 
     while True:
 
@@ -133,26 +133,27 @@ def main():
 
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
+            states_v = torch.Tensor(states).to(device)
 
             logits = []
             values = []
             bsvalues = []
             last_state_idx = []
             for bi in range(NUM_BATCH):
-                logit, value = net(torch.Tensor(states[bi]))
+                logit, value = net(states_v[bi])
                 logits.append(logit)
                 values.append(value.squeeze(1))
                 if last_states[bi] is not None:
-                    _, bsvalue = net(torch.Tensor([last_states[bi]]))
+                    _, bsvalue = net(torch.Tensor([last_states[bi]]).to(device))
                     bsvalues.append(bsvalue.squeeze(1))
                     last_state_idx.append(bi)
 
             learner_logits = torch.stack(logits).permute(1, 0, 2)
             learner_values = torch.stack(values).permute(1, 0)
             actor_logits = torch.stack(logits).permute(1, 0, 2)
-            actor_actions = torch.LongTensor(actions).permute(1, 0)
-            actor_rewards = torch.Tensor(rewards).permute(1, 0)
-            bootstrap_value = torch.Tensor(bsvalues)
+            actor_actions = torch.LongTensor(actions).to(device).permute(1, 0)
+            actor_rewards = torch.Tensor(rewards).to(device).permute(1, 0)
+            bootstrap_value = torch.Tensor(bsvalues).to(device)
             learner_log_probs =\
                 log_probs_from_logits_and_actions(learner_logits,
                                                   actor_actions)

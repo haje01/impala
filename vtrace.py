@@ -37,13 +37,8 @@ def from_importance_weights(log_rhos, discounts, rewards, values,
     Returns:
         VTraceReturns
     """
-    log_rhos = torch.Tensor(log_rhos)
-    discounts = torch.Tensor(discounts)
-    rewards = torch.Tensor(rewards)
-    values = torch.Tensor(values)
     time_steps = discounts.size(0)
     batch_size = discounts.size(1)
-    bootstrap_value = torch.Tensor(bootstrap_value)
     rhos = torch.exp(log_rhos)
 
     # IS 절단
@@ -101,9 +96,6 @@ def log_probs_from_logits_and_actions(policy_logits, actions):
     Returns:
         정책에 따라 선택된 동작의 확률. [T, B]형태
     """
-    policy_logits = torch.Tensor(policy_logits)
-    actions = torch.LongTensor(actions)
-
     assert len(policy_logits.shape) == 3
     assert len(actions.shape) == 2
 
@@ -137,9 +129,9 @@ def from_logits(behavior_policy_logits, target_policy_logits, actions,
     Returns:
         VTraceFromLogitsReturns
     """
-    behavior_policy_logits = torch.Tensor(behavior_policy_logits)
-    target_policy_logits = torch.Tensor(target_policy_logits)
-    actions = torch.LongTensor(actions)
+    behavior_policy_logits = torch.Tensor(behavior_policy_logits).to(device)
+    target_policy_logits = torch.Tensor(target_policy_logits).to(device)
+    actions = torch.LongTensor(actions).to(device)
 
     assert len(behavior_policy_logits.shape) == 3
     assert len(target_policy_logits.shape) == 3
