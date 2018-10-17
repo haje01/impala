@@ -171,7 +171,7 @@ def main():
             # for A2C (Policy Lag 무시)
             #
             ENTROPY_BETA = 0.01
-            CLIP_GRAD = 0.1
+            CLIP_GRAD = 10
 
             logits_v, value_v = net(states_v)
             value_v.squeeze_()
