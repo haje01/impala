@@ -98,19 +98,26 @@ def main():
     log("sending parameters to actors…")
     publish_model(net, act_sock)
 
-    optimizer = optim.RMSprop(net.parameters(),
-                              lr=RMS_LR,
-                              eps=RMS_EPS,
-                              momentum=RMS_MOMENTUM)
+    # for A2C
+    LEARNING_RATE = 1e-4
+    optimizer = optim.RMSprop(net.parameters(), lr=LEARNING_RATE, eps=1e-5)
+
+    # for V-trace
+    # optimizer = optim.RMSprop(net.parameters(),
+    #                           lr=RMS_LR,
+    #                           eps=RMS_EPS,
+    #                           momentum=RMS_MOMENTUM)
 
     fps = 0.0
     p_time = None
     step_idx = 1
     max_reward = -1000
+
+    # for V-trace
     # 감쇄 상수
-    discounts = np.array([pow(GAMMA, i) for i in range(NUM_UNROLL)])
-    discounts = np.repeat(discounts, NUM_BATCH).reshape(NUM_UNROLL, NUM_BATCH)
-    discounts_v = torch.Tensor(discounts).to(device)
+    # discounts = np.array([pow(GAMMA, i) for i in range(NUM_UNROLL)])
+    # discounts = np.repeat(discounts, NUM_BATCH).reshape(NUM_UNROLL, NUM_BATCH)
+    # discounts_v = torch.Tensor(discounts).to(device)
 
     while True:
 
@@ -120,6 +127,7 @@ def main():
         buf_sock.send(b'')
         payload = buf_sock.recv()
         log("receive batch elapse {:.2f}".format(time.time() - st))
+        step_delta = 0
 
         if payload == b'not enough':
             # 아직 배치가 부족
@@ -134,77 +142,119 @@ def main():
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
             states_v = torch.Tensor(states).to(device)
+            # for A2C
+            states_v = states_v.view(64 * 5, 4, 84, 84)
 
             logits = []
             values = []
             bsvalues = []
             last_state_idx = []
-            for bi in range(NUM_BATCH):
-                logit, value = net(states_v[bi])
-                logits.append(logit)
-                values.append(value.squeeze(1))
-                if last_states[bi] is not None:
-                    _, bsvalue = net(torch.Tensor([last_states[bi]]).to(device))
-                    bsvalues.append(bsvalue.squeeze(1))
-                    last_state_idx.append(bi)
+            # for V-trace
+            # for bi in range(NUM_BATCH):
+            #     logit, value = net(states_v[bi])
+            #     logits.append(logit)
+            #     values.append(value.squeeze(1))
+            #     if last_states[bi] is not None:
+            #         _, bsvalue = net(torch.Tensor([last_states[bi]]).to(device))
+            #         bsvalues.append(bsvalue.squeeze(1))
+            #         last_state_idx.append(bi)
 
-            learner_logits = torch.stack(logits).permute(1, 0, 2)
-            learner_values = torch.stack(values).permute(1, 0)
-            actor_logits = torch.stack(logits).permute(1, 0, 2)
-            actor_actions = torch.LongTensor(actions).to(device).permute(1, 0)
-            actor_rewards = torch.Tensor(rewards).to(device).permute(1, 0)
-            bootstrap_value = torch.Tensor(bsvalues).to(device)
-            learner_log_probs =\
-                log_probs_from_logits_and_actions(learner_logits,
-                                                  actor_actions)
-            actor_log_probs =\
-                log_probs_from_logits_and_actions(actor_logits,
-                                                  actor_actions)
-            log_rhos = learner_log_probs - actor_log_probs
+            # learner_logits = torch.stack(logits).permute(1, 0, 2)
+            # learner_values = torch.stack(values).permute(1, 0)
+            # actor_logits = torch.stack(logits).permute(1, 0, 2)
+            actor_actions = torch.LongTensor(actions).to(device).view(320)
+            rewards_v = torch.Tensor(rewards).to(device).view(320)
+            # bootstrap_value = torch.Tensor(bsvalues).to(device)
 
-            vtrace_ret = from_importance_weights(
-                log_rhos=log_rhos,
-                discounts=discounts_v,
-                rewards=actor_rewards,
-                values=learner_values,
-                bootstrap_value=bootstrap_value,
-                last_state_idx=last_state_idx
-            )
-            pg_loss, entropy_loss, baseline_loss, total_loss = \
-                calc_loss(learner_logits, learner_values, actor_actions,
-                          vtrace_ret)
+            #
+            # for A2C (Policy Lag 무시)
+            #
+            ENTROPY_BETA = 0.01
+            CLIP_GRAD = 0.1
 
-            # 역전파
-            total_loss.backward()
-            grads = np.concatenate([p.grad.data.cpu().numpy().flatten()
-                                   for p in net.parameters()
-                                   if p.grad is not None])
-            # 경사 클리핑
+            logits_v, value_v = net(states_v)
+            value_v.squeeze_()
+            adv_v = rewards_v - value_v
+            vals_ref_v = rewards_v
+            loss_value_v = F.mse_loss(value_v, vals_ref_v)
+
+            log_prob_v = F.log_softmax(logits_v, dim=1)
+            log_prob_actions_v = adv_v.unsqueeze(1) * log_prob_v[actor_actions]
+            loss_policy_v = -log_prob_actions_v.mean()
+
+            prob_v = F.softmax(logits_v, dim=1)
+            entropy_loss_v = (prob_v * log_prob_v).sum(dim=1).mean()
+
+            # apply entropy and value gradients
+            loss_v = loss_policy_v + ENTROPY_BETA * entropy_loss_v + \
+                loss_value_v
+            loss_v.backward()
             nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
             optimizer.step()
 
+            # for V-trace
+            # learner_log_probs =\
+            #     log_probs_from_logits_and_actions(learner_logits,
+            #                                       actor_actions)
+            # actor_log_probs =\
+            #     log_probs_from_logits_and_actions(actor_logits,
+            #                                       actor_actions)
+            # log_rhos = learner_log_probs - actor_log_probs
+
+            # vtrace_ret = from_importance_weights(
+            #     log_rhos=log_rhos,
+            #     discounts=discounts_v,
+            #     rewards=actor_rewards,
+            #     values=learner_values,
+            #     bootstrap_value=bootstrap_value,
+            #     last_state_idx=last_state_idx
+            # )
+            # pg_loss, entropy_loss, baseline_loss, total_loss = \
+            #     calc_loss(learner_logits, learner_values, actor_actions,
+            #               vtrace_ret)
+
+            # 역전파
+            # total_loss.backward()
+            # grads = np.concatenate([p.grad.data.cpu().numpy().flatten()
+            #                        for p in net.parameters()
+            #                        if p.grad is not None])
+            # # 경사 클리핑
+            # nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
+            # optimizer.step()
+
             if step_idx % SHOW_FREQ == 0:
                 # 보드 게시
-                vtrace_vs = vtrace_ret.vs.mean()
-                vtrace_pg_adv = vtrace_ret.pg_advantages.mean()
-                learner_value = learner_values.mean()
-                all_agent_ep_rewards = [val.reward for val in ainfos.values()]
-                avg_reward = np.mean(all_agent_ep_rewards)
+                adv = adv_v.mean()
+                value = value_v.mean()
+                reward = vals_ref_v.mean()
+                writer.add_scalar("advantage",       adv, step_idx)
+                writer.add_scalar("values",          value, step_idx)
+                writer.add_scalar("batch_rewards",   reward, step_idx)
+                writer.add_scalar("loss_entropy",    entropy_loss_v, step_idx)
+                writer.add_scalar("loss_policy",     loss_policy_v, step_idx)
+                writer.add_scalar("loss_value",      loss_value_v, step_idx)
+                writer.add_scalar("loss_total",      loss_v, step_idx)
 
-                writer.add_scalar("vtrace/vs", vtrace_vs, step_idx)
-                writer.add_scalar("vtrace/pg_advantage", vtrace_pg_adv,
-                                  step_idx)
-                writer.add_scalar("actor/avg_reward", avg_reward, step_idx)
-                writer.add_scalar("learner/value", learner_value, step_idx)
-                writer.add_scalar("loss/entropy", entropy_loss, step_idx)
-                writer.add_scalar("loss/policy_grad", pg_loss, step_idx)
-                writer.add_scalar("loss/baseline", baseline_loss, step_idx)
-                writer.add_scalar("loss/total", total_loss, step_idx)
-                writer.add_scalar("grad/l2",
-                                  np.sqrt(np.mean(np.square(grads))), step_idx)
-                writer.add_scalar("grad/max", np.max(np.abs(grads)), step_idx)
-                writer.add_scalar("grad/var", np.var(grads), step_idx)
-                writer.add_scalar("buffer/replay", binfo.replay, step_idx)
+                # vtrace_vs = vtrace_ret.vs.mean()
+                # vtrace_pg_adv = vtrace_ret.pg_advantages.mean()
+                # learner_value = learner_values.mean()
+                # all_agent_ep_rewards = [val.reward for val in ainfos.values()]
+                # avg_reward = np.mean(all_agent_ep_rewards)
+
+                # writer.add_scalar("vtrace/vs", vtrace_vs, step_idx)
+                # writer.add_scalar("vtrace/pg_advantage", vtrace_pg_adv,
+                #                   step_idx)
+                # writer.add_scalar("actor/avg_reward", avg_reward, step_idx)
+                # writer.add_scalar("learner/value", learner_value, step_idx)
+                # writer.add_scalar("loss/entropy", entropy_loss, step_idx)
+                # writer.add_scalar("loss/policy_grad", pg_loss, step_idx)
+                # writer.add_scalar("loss/baseline", baseline_loss, step_idx)
+                # writer.add_scalar("loss/total", total_loss, step_idx)
+                # writer.add_scalar("grad/l2",
+                #                   np.sqrt(np.mean(np.square(grads))), step_idx)
+                # writer.add_scalar("grad/max", np.max(np.abs(grads)), step_idx)
+                # writer.add_scalar("grad/var", np.var(grads), step_idx)
+                # writer.add_scalar("buffer/replay", binfo.replay, step_idx)
 
             # 최고 리워드 모델 저장
             _max_reward = np.max([ainfo.reward for ainfo in ainfos.values()])

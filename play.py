@@ -6,6 +6,7 @@ import collections
 
 import numpy as np
 import torch
+from torch.nn import functional as nn_func
 
 from wrappers import make_env
 
@@ -44,12 +45,13 @@ if __name__ == "__main__":
         if args.visualize:
             env.render()
         state_v = torch.tensor(np.array([state], copy=False))
-        q_vals = net(state_v).data.numpy()[0]
-        action = np.argmax(q_vals)
+        logit, value = net(state_v)
+        probs = nn_func.softmax(logit, dim=1).data.numpy()
+        action = np.argmax(probs)
         if dead:
             action = 1
             dead = False
-        # print("action: {} q_vals: {}".format(action, q_vals))
+        print("action: {} probs: {}".format(action, probs))
         c[action] += 1
         state, reward, done, info = env.step(action)
         total_reward += reward

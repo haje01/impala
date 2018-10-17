@@ -11,8 +11,8 @@ from torch import nn
 from torch.nn.init import xavier_uniform_
 
 GAMMA = 0.99
-NUM_UNROLL = 10
-NUM_BATCH = 128
+NUM_UNROLL = 5  # 10
+NUM_BATCH = 64  # 256
 
 ENV_NAME = "PongNoFrameskip-v4"
 
