@@ -3,6 +3,7 @@
 import time
 import pickle
 from io import BytesIO
+from collections import Counter
 
 import zmq
 import numpy as np
@@ -16,7 +17,7 @@ from tensorboardX import SummaryWriter
 
 from vtrace import log_probs_from_logits_and_actions, from_importance_weights
 from common import A2C, ENV_NAME, get_device, get_logger, weights_init,\
-    NUM_BATCH, NUM_UNROLL, GAMMA, byte2float
+    NUM_BATCH, NUM_UNROLL, GAMMA
 from wrappers import make_env
 
 STOP_REWARD = 500
@@ -127,7 +128,6 @@ def main():
         buf_sock.send(b'')
         payload = buf_sock.recv()
         log("receive batch elapse {:.2f}".format(time.time() - st))
-        step_delta = 0
 
         if payload == b'not enough':
             # 아직 배치가 부족
@@ -141,7 +141,8 @@ def main():
 
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
-            states_v = torch.Tensor(byte2float(states)).to(device)
+            import pdb; pdb.set_trace()  # breakpoint c303850a //
+            states_v = torch.Tensor(states).to(device)
             # for A2C
             states_v = states_v.view(64 * 5, 4, 84, 84)
 
@@ -155,6 +156,7 @@ def main():
             #     logits.append(logit)
             #     values.append(value.squeeze(1))
             #     if last_states[bi] is not None:
+            # FIX last_states to float!!!
             #         _, bsvalue = net(torch.Tensor([last_states[bi]]).to(device))
             #         bsvalues.append(bsvalue.squeeze(1))
             #         last_state_idx.append(bi)
@@ -179,6 +181,7 @@ def main():
             loss_value_v = F.mse_loss(value_v, vals_ref_v)
 
             log_prob_v = F.log_softmax(logits_v, dim=1)
+            print("Action counter {}".format(Counter(log_prob_v.max(1)[1].tolist())))
             log_prob_actions_v = adv_v.unsqueeze(1) * log_prob_v[actor_actions]
             loss_policy_v = -log_prob_actions_v.mean()
 
