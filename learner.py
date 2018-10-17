@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 
 from vtrace import log_probs_from_logits_and_actions, from_importance_weights
 from common import A2C, ENV_NAME, get_device, get_logger, weights_init,\
-    NUM_BATCH, NUM_UNROLL, GAMMA
+    NUM_BATCH, NUM_UNROLL, GAMMA, byte2float
 from wrappers import make_env
 
 STOP_REWARD = 500
@@ -141,7 +141,7 @@ def main():
 
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
-            states_v = torch.Tensor(states).to(device)
+            states_v = torch.Tensor(byte2float(states)).to(device)
             # for A2C
             states_v = states_v.view(64 * 5, 4, 84, 84)
 

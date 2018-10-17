@@ -12,7 +12,7 @@ import torch.nn.functional as TF
 
 from common import ReplayBuffer, ENV_NAME, ActorInfo, get_logger, A2C,\
     async_recv, weights_init, Experience, float2byte, GAMMA,\
-    NUM_UNROLL
+    NUM_UNROLL, byte2float
 from wrappers import make_env
 
 SHOW_FREQ = 100       # 로그 출력 주기
@@ -56,7 +56,7 @@ class Agent:
 
     def _reset(self):
         """리셋 구현."""
-        self.last_state = float2byte(self.env.reset())
+        self.last_state = self.env.reset()
         self.action_cnt = defaultdict(int)
         self.states = [None] * (self.unroll_cnt + 1)
         self.logits = [None] * (self.unroll_cnt + 1)
@@ -67,7 +67,7 @@ class Agent:
     def get_logit_and_action(self, net, state):
         """주어진 상태에서 동작을 선택."""
         # 환경 진행
-        state_v = torch.Tensor(state).unsqueeze(0)
+        state_v = torch.Tensor(byte2float(state)).unsqueeze(0)
         logits, _ = net(state_v)
         logit_v = logits[0].data.cpu().numpy()
         prob_v = TF.softmax(logits, dim=1)[0]
@@ -89,7 +89,6 @@ class Agent:
             self.logits[ti] = logit
             self.actions[ti] = action
             state, reward, is_done, _ = self.env.step(action)
-            state = float2byte(state)
             self.rewards[ti] = reward
             if is_done:
                 break
@@ -106,7 +105,8 @@ class Agent:
                 step_reward *= GAMMA
                 step_reward += self.rewards[i]
 
-        states_np = np.array(self.states[:-1])
+        states_np = np.array([float2byte(state) for state in self.states[:-1]
+                             if state is not None])
         logits_np = np.array(self.logits[:-1])
         actions_np = np.array(self.actions[:-1])
         rewards_np = np.array(self.rewards[:-1])
