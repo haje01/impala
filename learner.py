@@ -128,6 +128,7 @@ def main():
         buf_sock.send(b'')
         payload = buf_sock.recv()
         log("receive batch elapse {:.2f}".format(time.time() - st))
+        roll_and_batch = NUM_BATCH * NUM_UNROLL
 
         if payload == b'not enough':
             # 아직 배치가 부족
@@ -143,7 +144,7 @@ def main():
             states, logits, actions, rewards, last_states = batch
             states_v = torch.Tensor(states).to(device)
             # for A2C
-            states_v = states_v.view(64 * 5, 4, 84, 84)
+            states_v = states_v.view(roll_and_batch, 4, 84, 84)
 
             logits = []
             values = []
@@ -163,8 +164,9 @@ def main():
             # learner_logits = torch.stack(logits).permute(1, 0, 2)
             # learner_values = torch.stack(values).permute(1, 0)
             # actor_logits = torch.stack(logits).permute(1, 0, 2)
-            actor_actions = torch.LongTensor(actions).to(device).view(320)
-            rewards_v = torch.Tensor(rewards).to(device).view(320)
+            actor_actions = torch.LongTensor(actions).to(device).\
+                view(roll_and_batch)
+            rewards_v = torch.Tensor(rewards).to(device).view(roll_and_batch)
             # bootstrap_value = torch.Tensor(bsvalues).to(device)
 
             #
