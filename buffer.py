@@ -9,8 +9,8 @@ import numpy as np
 from common import ReplayBuffer, async_recv, ActorInfo, BufferInfo,\
     get_logger, NUM_BATCH
 
-BUFFER_SIZE = 1000
-START_SIZE = 50
+BUFFER_SIZE = 3000
+START_SIZE = 300
 
 
 def average_actor_info(ainfos):

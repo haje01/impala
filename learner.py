@@ -141,7 +141,6 @@ def main():
 
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
-            import pdb; pdb.set_trace()  # breakpoint c303850a //
             states_v = torch.Tensor(states).to(device)
             # for A2C
             states_v = states_v.view(64 * 5, 4, 84, 84)
@@ -181,7 +180,8 @@ def main():
             loss_value_v = F.mse_loss(value_v, vals_ref_v)
 
             log_prob_v = F.log_softmax(logits_v, dim=1)
-            print("Action counter {}".format(Counter(log_prob_v.max(1)[1].tolist())))
+            print("Action counter {}".
+                  format(Counter(log_prob_v.max(1)[1].tolist())))
             log_prob_actions_v = adv_v.unsqueeze(1) * log_prob_v[actor_actions]
             loss_policy_v = -log_prob_actions_v.mean()
 
