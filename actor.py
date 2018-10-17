@@ -73,6 +73,7 @@ class Agent:
         prob_v = TF.softmax(logits, dim=1)[0]
         prob = prob_v.data.cpu().numpy()
         action = np.random.choice(len(prob), p=prob)
+        print("prob {} action {}".format(prob, action))
         self.action_cnt[action] += 1
         return logit_v, action
 
@@ -105,8 +106,7 @@ class Agent:
                 step_reward *= GAMMA
                 step_reward += self.rewards[i]
 
-        states_np = np.array([float2byte(state) for state in self.states[:-1]
-                             if state is not None])
+        states_np = float2byte(np.array(self.states[:-1]))
         logits_np = np.array(self.logits[:-1])
         actions_np = np.array(self.actions[:-1])
         rewards_np = np.array(self.rewards[:-1])
