@@ -18,7 +18,6 @@ from wrappers import make_env
 SHOW_FREQ = 100       # 로그 출력 주기
 SEND_SIZE = 100       # 보낼 전이 수
 SEND_FREQ = 100       # 보낼 빈도
-MODEL_UPDATE_FREQ = 300    # 러너의 모델 가져올 주기
 
 actor_id = int(os.environ.get('ACTOR_ID', '-1'))    # 액터의 ID
 assert actor_id != -1
@@ -84,7 +83,7 @@ class Agent:
         last_state = done_reward = None
         step_reward = 0.0
 
-        # 언롤만큼 진행
+        # 롤아웃의 가치 근사를 위해 언롤수 +1 만큼 진행
         for ti in range(self.unroll_cnt + 1):
             self.states[ti] = state
             logit, action = self.get_logit_and_action(net, state)
@@ -107,6 +106,7 @@ class Agent:
             if self.rewards[i] is not None:
                 step_reward *= GAMMA
                 step_reward += self.rewards[i]
+                self.rewards[i] = step_reward
 
         states_np = np.array(self.states[:-1])
         logits_np = np.array(self.logits[:-1])

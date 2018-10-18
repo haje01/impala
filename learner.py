@@ -21,9 +21,9 @@ from wrappers import make_env
 
 STOP_REWARD = 500
 SHOW_FREQ = 10
-PUBLISH_FREQ = 40  # Batch 크기에 맞게 (10초 정도)
+PUBLISH_FREQ = 1  # 매 학습마다 모델 배포 (~on-policy)
 SAVE_FREQ = 30
-CLIP_GRAD = 10
+CLIP_GRAD = 0.1
 RMS_LR = 1e-4
 RMS_MOMENTUM = 0.0
 RMS_EPS = 0.01
@@ -130,7 +130,6 @@ def main():
             batch, ainfos, binfo = pickle.loads(payload)
             states, logits, actions, rewards, last_states = batch
             states_v = torch.Tensor(states).to(device)
-            # for A2C
             states_v = states_v.view(roll_and_batch, 4, 84, 84)
 
             actor_actions = torch.LongTensor(actions).to(device).\
@@ -139,7 +138,7 @@ def main():
 
             logits_v, value_v = net(states_v)
             value_v.squeeze_()
-            adv_v = rewards_v - value_v
+            adv_v = rewards_v - value_v.detach()
             vals_ref_v = rewards_v
             loss_value_v = F.mse_loss(value_v, vals_ref_v)
 
@@ -148,14 +147,16 @@ def main():
                   format(Counter(log_prob_v.max(1)[1].tolist())))
             log_prob_actions_v = adv_v.unsqueeze(1) * log_prob_v[actor_actions]
             loss_policy_v = -log_prob_actions_v.mean()
+            loss_policy_v.backward(retain_graph=True)
 
             prob_v = F.softmax(logits_v, dim=1)
-            entropy_loss_v = (prob_v * log_prob_v).sum(dim=1).mean()
+            entropy_loss_v = ENTROPY_COST * (prob_v * log_prob_v).sum(dim=1).\
+                mean()
 
             # apply entropy and value gradients
-            loss_v = loss_policy_v + ENTROPY_COST * entropy_loss_v + \
-                loss_value_v
+            loss_v = entropy_loss_v + loss_value_v
             loss_v.backward()
+
             nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
             optimizer.step()
 
