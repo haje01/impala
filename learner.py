@@ -21,12 +21,12 @@ from wrappers import make_env
 
 STOP_REWARD = 500
 SHOW_FREQ = 10
-PUBLISH_FREQ = 40  # Batch 크기에 맞게 (10초 정도)
+PUBLISH_FREQ = 40  # Batch 크기에 맞게 (35초 정도)
 SAVE_FREQ = 30
-CLIP_GRAD = 10
-RMS_LR = 0.0006
+CLIP_GRAD = 0.1
+RMS_LR = 0.0001
 RMS_MOMENTUM = 0.0
-RMS_EPS = 0.01
+RMS_EPS = 1e-5
 ENTROPY_COST = 0.01
 BASELINE_COST = 0.5
 
@@ -58,10 +58,11 @@ def calc_loss(learner_logits, learner_values, actor_actions, vtrace_ret):
     # entropy loss
     prob = nn.Softmax(2)(learner_logits)
     log_prob = nn.LogSoftmax(2)(learner_logits)
-    print("Action counter {}".
-          format(Counter(log_prob.max(1)[1].tolist())))
+    # 예측된 동작 종류별 카운팅
+    actions = log_prob.max(2)[1]
+    actions = actions.view(actions.numel()).tolist()
+    print("Action counter {}".format(Counter(actions)))
     entropy_loss = (prob * log_prob).sum(dim=1).mean()
-
     # baseline loss
     baseline_loss = .5 * ((vtrace_ret.vs - learner_values) ** 2).sum()
 
