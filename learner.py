@@ -24,9 +24,10 @@ SHOW_FREQ = 10
 PUBLISH_FREQ = 10  # 모델 배포 빈도 (10초에 한 번정도)
 SAVE_FREQ = 30
 CLIP_GRAD = 0.1
-RMS_LR = 0.0001
-RMS_MOMENTUM = 0.0
-RMS_EPS = 1e-5
+LEARNING_RATE = 0.0001
+# RMS_LR = 0.0001
+# RMS_MOMENTUM = 0.0
+# RMS_EPS = 1e-5
 ENTROPY_COST = 0.01
 BASELINE_COST = 0.5
 
@@ -102,10 +103,11 @@ def main():
     log("sending parameters to actors…")
     publish_model(net, act_sock)
 
-    optimizer = optim.RMSprop(net.parameters(),
-                              lr=RMS_LR,
-                              eps=RMS_EPS,
-                              momentum=RMS_MOMENTUM)
+    optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
+    # optimizer = optim.RMSprop(net.parameters(),
+    #                           lr=RMS_LR,
+    #                           eps=RMS_EPS,
+    #                           momentum=RMS_MOMENTUM)
 
     fps = 0.0
     p_time = None
