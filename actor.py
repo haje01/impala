@@ -12,7 +12,7 @@ import torch.nn.functional as TF
 
 from common import ReplayBuffer, ENV_NAME, ActorInfo, get_logger, A2C,\
     async_recv, weights_init, Experience, float2byte, GAMMA,\
-    NUM_UNROLL
+    NUM_UNROLL, set_random_seed
 from wrappers import make_env
 
 SHOW_FREQ = 100       # 로그 출력 주기
@@ -52,6 +52,7 @@ class Agent:
         self.env = env
         self.memory = memory
         self.unroll_cnt = unroll_cnt
+        set_random_seed(env, actor_id)
         self._reset()
 
     def _reset(self):

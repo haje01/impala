@@ -17,7 +17,7 @@ from tensorboardX import SummaryWriter
 
 from vtrace import log_probs_from_logits_and_actions, from_importance_weights
 from common import A2C, ENV_NAME, get_device, get_logger, weights_init,\
-    NUM_BATCH, NUM_UNROLL, GAMMA
+    NUM_BATCH, NUM_UNROLL, GAMMA, set_random_seed
 from wrappers import make_env
 
 STOP_REWARD = 500
@@ -59,7 +59,7 @@ def calc_loss(learner_logits, learner_values, actor_actions, vtrace_ret):
     # entropy loss
     prob = nn.Softmax(2)(learner_logits)
     log_prob = nn.LogSoftmax(2)(learner_logits)
-    entropy_loss = -(-prob * log_prob).sum(dim=1).mean()
+    entropy_loss = (prob * log_prob).sum(dim=1).mean()
 
     # baseline loss
     baseline_loss = .5 * ((vtrace_ret.vs - learner_values) ** 2).sum()
@@ -83,6 +83,7 @@ def main():
     """메인 함수."""
     # 환경 생성
     env = make_env(ENV_NAME)
+    set_random_seed()
     device = get_device()
     net = A2C(env.observation_space.shape, env.action_space.n).to(device)
     net.apply(weights_init)
@@ -172,7 +173,7 @@ def main():
             #
             # for A2C (Policy Lag 무시)
             #
-            ENTROPY_BETA = 0.01
+            ENTROPY_BETA = 0.1
             CLIP_GRAD = 10
 
             logits_v, value_v = net(states_v)
