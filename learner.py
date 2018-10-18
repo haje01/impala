@@ -22,13 +22,13 @@ STOP_REWARD = 500
 SHOW_FREQ = 10
 PUBLISH_FREQ = 10  # 모델 배포 빈도 (10초에 한 번정도)
 SAVE_FREQ = 30
-CLIP_GRAD = 10
-LEARNING_RATE = 0.00001
+CLIP_GRAD = 1
+LEARNING_RATE = 0.0001
 # RMS_LR = 0.0001
 # RMS_MOMENTUM = 0.0
 # RMS_EPS = 1e-5
 ENTROPY_COST = 0.01
-BASELINE_COST = 0.3
+BASELINE_COST = 0.5
 
 log = get_logger()
 
@@ -54,7 +54,7 @@ def calc_loss_and_backprop(learner_logits, learner_values, actor_actions,
     ce_loss = nn.CrossEntropyLoss(reduce=False)
     pg_losses = ce_loss(learner_logits.permute(0, 2, 1), actor_actions) *\
         vtrace_ret.pg_advantages
-    pg_loss = pg_losses.sum()
+    pg_loss = pg_losses.mean()
     pg_loss.backward(retain_graph=True)
 
     # 엔트로피 손실
