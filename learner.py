@@ -21,7 +21,7 @@ from wrappers import make_env
 
 STOP_REWARD = 500
 SHOW_FREQ = 10
-PUBLISH_FREQ = 40  # Batch 크기에 맞게 (35초 정도)
+PUBLISH_FREQ = 10  # 모델 배포 빈도 (10초에 한 번정도)
 SAVE_FREQ = 30
 CLIP_GRAD = 0.1
 RMS_LR = 0.0001
@@ -189,27 +189,29 @@ def main():
             optimizer.step()
 
             if step_idx % SHOW_FREQ == 0:
-                # 보드 게시
+                # 보드 게시 (프레임 단위)
+                frame_idx = step_idx * NUM_BATCH * NUM_UNROLL
                 vtrace_vs = vtrace_ret.vs.mean()
                 vtrace_pg_adv = vtrace_ret.pg_advantages.mean()
                 learner_value = learner_values.mean()
                 all_agent_ep_rewards = [val.reward for val in ainfos.values()]
                 avg_reward = np.mean(all_agent_ep_rewards)
 
-                writer.add_scalar("vtrace/vs", vtrace_vs, step_idx)
+                writer.add_scalar("vtrace/vs", vtrace_vs, frame_idx)
                 writer.add_scalar("vtrace/pg_advantage", vtrace_pg_adv,
-                                  step_idx)
-                writer.add_scalar("actor/avg_reward", avg_reward, step_idx)
-                writer.add_scalar("learner/value", learner_value, step_idx)
-                writer.add_scalar("loss/entropy", entropy_loss, step_idx)
-                writer.add_scalar("loss/policy_grad", pg_loss, step_idx)
-                writer.add_scalar("loss/baseline", baseline_loss, step_idx)
-                writer.add_scalar("loss/total", total_loss, step_idx)
+                                  frame_idx)
+                writer.add_scalar("actor/avg_reward", avg_reward, frame_idx)
+                writer.add_scalar("learner/value", learner_value, frame_idx)
+                writer.add_scalar("loss/entropy", entropy_loss, frame_idx)
+                writer.add_scalar("loss/policy_grad", pg_loss, frame_idx)
+                writer.add_scalar("loss/baseline", baseline_loss, frame_idx)
+                writer.add_scalar("loss/total", total_loss, frame_idx)
                 writer.add_scalar("grad/l2",
-                                  np.sqrt(np.mean(np.square(grads))), step_idx)
-                writer.add_scalar("grad/max", np.max(np.abs(grads)), step_idx)
-                writer.add_scalar("grad/var", np.var(grads), step_idx)
-                writer.add_scalar("buffer/replay", binfo.replay, step_idx)
+                                  np.sqrt(np.mean(np.square(grads))),
+                                  frame_idx)
+                writer.add_scalar("grad/max", np.max(np.abs(grads)), frame_idx)
+                writer.add_scalar("grad/var", np.var(grads), frame_idx)
+                writer.add_scalar("buffer/replay", binfo.replay, frame_idx)
 
             # 최고 리워드 모델 저장
             _max_reward = np.max([ainfo.reward for ainfo in ainfos.values()])
