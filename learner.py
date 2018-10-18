@@ -47,27 +47,27 @@ def init_zmq():
     return context, act_sock, buf_sock
 
 
-def calc_loss(learner_logits, learner_values, actor_actions, vtrace_ret):
-    """손실 계산."""
-    # policy grandient loss
+def calc_loss_and_backprop(learner_logits, learner_values, actor_actions,
+                           vtrace_ret):
+    """손실 계산 후 역전파."""
+    # 정책 경사 손실
     ce_loss = nn.CrossEntropyLoss(reduce=False)
     pg_losses = ce_loss(learner_logits.permute(0, 2, 1), actor_actions) *\
         vtrace_ret.pg_advantages
     pg_loss = pg_losses.sum()
+    pg_loss.backward(retain_graph=True)
 
-    # entropy loss
+    # 엔트로피 손실
     prob = nn.Softmax(2)(learner_logits)
     log_prob = nn.LogSoftmax(2)(learner_logits)
-    # 예측된 동작 종류별 카운팅
-    actions = log_prob.max(2)[1]
-    actions = actions.view(actions.numel()).tolist()
-    print("Action counter {}".format(Counter(actions)))
     entropy_loss = (prob * log_prob).sum(dim=1).mean()
-    # baseline loss
+    # 기저 손실
     baseline_loss = .5 * ((vtrace_ret.vs - learner_values) ** 2).sum()
 
-    total_loss = pg_loss + ENTROPY_COST * entropy_loss +\
-        BASELINE_COST * baseline_loss
+    other_loss = ENTROPY_COST * entropy_loss + BASELINE_COST * baseline_loss
+    other_loss.backward()
+
+    total_loss = pg_loss + other_loss
 
     return pg_loss, entropy_loss, baseline_loss, total_loss
 
@@ -139,20 +139,24 @@ def main():
             states, logits, actions, rewards, last_states = batch
             states_v = torch.Tensor(states).to(device)
 
+            # 배치 수만큼
             logits = []
             values = []
             bsvalues = []
             last_state_idx = []
             for bi in range(NUM_BATCH):
+                # 러너의 모델로 예측
                 logit, value = net(states_v[bi])
                 logits.append(logit)
                 values.append(value.squeeze(1))
                 if last_states[bi] is not None:
+                    # 부트스트래핑을 위한 마지막 상태 수집
                     _, bsvalue = net(torch.Tensor([last_states[bi]]).
                                      to(device))
                     bsvalues.append(bsvalue.squeeze(1))
                     last_state_idx.append(bi)
 
+            # 러너/액터의 로짓과 동작에서 로그 확률얻어 중요도 샘플링 값 계산
             learner_logits = torch.stack(logits).permute(1, 0, 2)
             learner_values = torch.stack(values).permute(1, 0)
             actor_logits = torch.stack(logits).permute(1, 0, 2)
@@ -167,6 +171,7 @@ def main():
                                                   actor_actions)
             log_rhos = learner_log_probs - actor_log_probs
 
+            # 중요도 샘플링 값에서 V-trace 결과 얻음
             vtrace_ret = from_importance_weights(
                 log_rhos=log_rhos,
                 discounts=discounts_v,
@@ -175,12 +180,11 @@ def main():
                 bootstrap_value=bootstrap_value,
                 last_state_idx=last_state_idx
             )
+            # 손실 계산 후 역전파
             pg_loss, entropy_loss, baseline_loss, total_loss = \
-                calc_loss(learner_logits, learner_values, actor_actions,
-                          vtrace_ret)
+                calc_loss_and_backprop(learner_logits, learner_values,
+                                       actor_actions, vtrace_ret)
 
-            # 역전파
-            total_loss.backward()
             grads = np.concatenate([p.grad.data.cpu().numpy().flatten()
                                    for p in net.parameters()
                                    if p.grad is not None])
@@ -190,28 +194,10 @@ def main():
 
             if step_idx % SHOW_FREQ == 0:
                 # 보드 게시 (프레임 단위)
-                frame_idx = step_idx * NUM_BATCH * NUM_UNROLL
-                vtrace_vs = vtrace_ret.vs.mean()
-                vtrace_pg_adv = vtrace_ret.pg_advantages.mean()
-                learner_value = learner_values.mean()
-                all_agent_ep_rewards = [val.reward for val in ainfos.values()]
-                avg_reward = np.mean(all_agent_ep_rewards)
-
-                writer.add_scalar("vtrace/vs", vtrace_vs, frame_idx)
-                writer.add_scalar("vtrace/pg_advantage", vtrace_pg_adv,
-                                  frame_idx)
-                writer.add_scalar("actor/avg_reward", avg_reward, frame_idx)
-                writer.add_scalar("learner/value", learner_value, frame_idx)
-                writer.add_scalar("loss/entropy", entropy_loss, frame_idx)
-                writer.add_scalar("loss/policy_grad", pg_loss, frame_idx)
-                writer.add_scalar("loss/baseline", baseline_loss, frame_idx)
-                writer.add_scalar("loss/total", total_loss, frame_idx)
-                writer.add_scalar("grad/l2",
-                                  np.sqrt(np.mean(np.square(grads))),
-                                  frame_idx)
-                writer.add_scalar("grad/max", np.max(np.abs(grads)), frame_idx)
-                writer.add_scalar("grad/var", np.var(grads), frame_idx)
-                writer.add_scalar("buffer/replay", binfo.replay, frame_idx)
+                # frame_idx = step_idx * NUM_BATCH * NUM_UNROLL
+                write_tb(writer, step_idx, vtrace_ret, learner_values,
+                         entropy_loss, pg_loss, baseline_loss, total_loss,
+                         grads, ainfos, binfo)
 
             # 최고 리워드 모델 저장
             _max_reward = np.max([ainfo.reward for ainfo in ainfos.values()])
@@ -232,6 +218,32 @@ def main():
         p_time = time.time()
 
     writer.close()
+
+
+def write_tb(writer, frame_idx, vtrace_ret, learner_values, entropy_loss,
+             pg_loss, baseline_loss, total_loss, grads, ainfos, binfo):
+    """턴서보드에 쓰기."""
+    vtrace_vs = vtrace_ret.vs.mean()
+    vtrace_pg_adv = vtrace_ret.pg_advantages.mean()
+    learner_value = learner_values.mean()
+    all_agent_ep_rewards = [val.reward for val in ainfos.values()]
+    avg_reward = np.mean(all_agent_ep_rewards)
+
+    writer.add_scalar("vtrace/vs", vtrace_vs, frame_idx)
+    writer.add_scalar("vtrace/pg_advantage", vtrace_pg_adv,
+                      frame_idx)
+    writer.add_scalar("actor/avg_reward", avg_reward, frame_idx)
+    writer.add_scalar("learner/value", learner_value, frame_idx)
+    writer.add_scalar("loss/entropy", entropy_loss, frame_idx)
+    writer.add_scalar("loss/policy_grad", pg_loss, frame_idx)
+    writer.add_scalar("loss/baseline", baseline_loss, frame_idx)
+    writer.add_scalar("loss/total", total_loss, frame_idx)
+    writer.add_scalar("grad/l2",
+                      np.sqrt(np.mean(np.square(grads))),
+                      frame_idx)
+    writer.add_scalar("grad/max", np.max(np.abs(grads)), frame_idx)
+    writer.add_scalar("grad/var", np.var(grads), frame_idx)
+    writer.add_scalar("buffer/replay", binfo.replay, frame_idx)
 
 
 if __name__ == '__main__':
