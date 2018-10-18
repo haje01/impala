@@ -3,7 +3,6 @@
 import time
 import pickle
 from io import BytesIO
-from collections import Counter
 
 import zmq
 import numpy as np
@@ -23,13 +22,13 @@ STOP_REWARD = 500
 SHOW_FREQ = 10
 PUBLISH_FREQ = 10  # 모델 배포 빈도 (10초에 한 번정도)
 SAVE_FREQ = 30
-CLIP_GRAD = 0.1
-LEARNING_RATE = 0.0001
+CLIP_GRAD = 10
+LEARNING_RATE = 0.00001
 # RMS_LR = 0.0001
 # RMS_MOMENTUM = 0.0
 # RMS_EPS = 1e-5
 ENTROPY_COST = 0.01
-BASELINE_COST = 0.5
+BASELINE_COST = 0.3
 
 log = get_logger()
 
