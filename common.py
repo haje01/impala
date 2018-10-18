@@ -11,8 +11,9 @@ from torch import nn
 from torch.nn.init import xavier_uniform_
 
 GAMMA = 0.99
-NUM_UNROLL = 10
+NUM_UNROLL = 5
 NUM_BATCH = 128
+RANDOM_SEED = 20
 
 ENV_NAME = "PongNoFrameskip-v4"
 
@@ -40,6 +41,17 @@ def get_device():
     print("Using {} device.".format(dev.upper()))
     device = torch.device(dev)
     return device
+
+
+def set_random_seed(actor_env=None, actor_id=None):
+    """랜덤시드를 설정."""
+    np.random.seed(RANDOM_SEED)
+    torch.manual_seed(RANDOM_SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(RANDOM_SEED)
+
+    if actor_env is not None and actor_id is not None:
+        actor_env.seed(RANDOM_SEED + actor_id)
 
 
 class A2C(nn.Module):
